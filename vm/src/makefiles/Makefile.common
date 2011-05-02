@@ -19,6 +19,13 @@ ifndef PLATFORM
   PLATFORM = Tilera
 endif
 
+ifeq "$(SUPPRESS_CMD_OUTPUT)" "1"
+  AT = @
+else
+  AT =
+endif
+
+
 ifdef TILERA_ROOT
 BIN = $(TILERA_ROOT)/bin/
 endif
@@ -71,8 +78,12 @@ INCLUDES += \
 endif
 
 
-CONFIG_FLAGS += -Winline -DExtra_Preheader_Word_Experiment=1
-CXX_CONFIG_FLAGS += -Winline
+CONFIG_FLAGS += -DExtra_Preheader_Word_Experiment=1
+
+# removed -Winline warning for now, was not useful so far
+#CONFIG_FLAGS += -Winline 
+#CXX_CONFIG_FLAGS += -Winline
+
 CFLAGS = $(INCLUDES) $(CONFIG_FLAGS) -include rvm_config.h
 CXXFLAGS = -fno-rtti $(CXX_CONFIG_FLAGS)
 CONLYFLAGS = -w $(CONLY_CONFIG_FLAGS)
@@ -273,28 +284,45 @@ $(RVM_HEADERS):
 #Hack to satisfy make, to force override buildin rules, even if its not able to find all prerequisites.
 $(SQ_HEADERS):
 
+ifneq "$(OS)" "Darwin"
+  DO_ESCAPING=-e
+endif
+TTY=$(shell test -t 0 && echo "true")
+ifeq "$(TTY)" "true"
+  START_BOLD=\x1B[1m
+  STOP_BOLD=\x1B[22m
+endif
+PRINT_COMPILATION_INFO=@echo $(DO_ESCAPING) "$(START_BOLD)Compiling $(notdir $<)$(STOP_BOLD)"
+
 #the space after %.i is necessary, otherwise the buildin will not be canceled properly
 %.i : %.c $(SQ_HEADERS)
-	$(CC) $(CFLAGS) $(CONLYFLAGS) -E  $< -o $@
+	$(PRINT_COMPILATION_INFO)
+	$(AT)$(CC) $(CFLAGS) $(CONLYFLAGS) -E  $< -o $@
 
 %.o : %.c $(SQ_HEADERS) Makefile
-	$(CC) $(CFLAGS) $(CONLYFLAGS) $(LOW_OPTIMIZE_LEVEL)  -c $< -o $@
+	$(PRINT_COMPILATION_INFO)
+	$(AT)$(CC) $(CFLAGS) $(CONLYFLAGS) $(LOW_OPTIMIZE_LEVEL)  -c $< -o $@
 
 %.opt : %.c $(SQ_HEADERS) Makefile
-	$(CC) $(CFLAGS) $(CONLYFLAGS) $(HIGH_OPTIMIZE_LEVEL) -c $< -o $@
+	$(PRINT_COMPILATION_INFO)
+	$(AT)$(CC) $(CFLAGS) $(CONLYFLAGS) $(HIGH_OPTIMIZE_LEVEL) -c $< -o $@
 
 %.i : %.cpp  $(RVM_HEADERS)
-	$(CXX) $(CFLAGS) $(CXXFLAGS) -E $< -o $@
+	$(PRINT_COMPILATION_INFO)
+	$(AT)$(CXX) $(CFLAGS) $(CXXFLAGS) -E $< -o $@
 
 %.o : %.cpp $(RVM_HEADERS) Makefile compiler_check
-	$(CXX) $(CFLAGS) $(CXXFLAGS) $(LOW_OPTIMIZE_LEVEL)  -c $< -o $@
+	$(PRINT_COMPILATION_INFO)
+	$(AT)$(CXX) $(CFLAGS) $(CXXFLAGS) $(LOW_OPTIMIZE_LEVEL)  -c $< -o $@
 
 %.opt : %.cpp $(RVM_HEADERS) Makefile compiler_check
-	$(CXX) $(CFLAGS) $(CXXFLAGS) $(HIGH_OPTIMIZE_LEVEL) -c $< -o $@
+	$(PRINT_COMPILATION_INFO)
+	$(AT)$(CXX) $(CFLAGS) $(CXXFLAGS) $(HIGH_OPTIMIZE_LEVEL) -c $< -o $@
 
 
 compiler_check:
-	$(CXX) $(CONFIG_FLAGS) -c $(SRC_DIR)/compiler_check.cpp -o compiler_check
+	@echo Checking Compiler for know problems
+	$(AT)$(CXX) $(CONFIG_FLAGS) -c $(SRC_DIR)/compiler_check.cpp -o compiler_check
 
 vpath %.c $(SRC_DIR)/from_squeak
 vpath %.c $(SRC_DIR)/from_squeak/Cross
@@ -407,7 +435,6 @@ OBJS = \
   interpreter_bytecodes.opt \
   interpreter_primitives.o \
   LargeIntegers.opt \
-  main.opt \
   Matrix2x3Plugin.opt \
   measurements.opt \
   memory_system.o \
@@ -523,8 +550,8 @@ else
 endif
 
 
-rvm: $(OBJS)
-	$(CXX) $(LDFLAGS) $(OBJS) -lm $(TILERA_LIBS) $(LIBS_LINKING) -o $@
+rvm: $(OBJS) main.opt
+	$(CXX) $(LDFLAGS) $(OBJS) main.opt -lm $(TILERA_LIBS) $(LIBS_LINKING) -o $@
 
 # Test Related targets, we use the googletest framework for unit tests
 
@@ -538,18 +565,18 @@ libgtest.a:
 # REM: this will build the object files inside the test folder
 #      this allows us to use the same names for tests and implementation files
 TEST_SRC  := $(wildcard $(SRC_DIR)/tests/*.cpp)
-TEST_OBJS := $(TEST_SRC:.cpp=.o) \
-  synced_queue.opt \
-  buffered_channel.opt \
-  
+TEST_H    := $(wildcard $(SRC_DIR)/tests/*.h)
+TEST_OBJS := $(TEST_SRC:.cpp=.o) $(OBJS)
+
+$(TEST_OBJS) : $(TEST_H)
 
 rvm-test : CXXFLAGS:=$(CXX_CONFIG_FLAGS)
 rvm-test : INCLUDES+=$(GTEST_INCLUDES)
-rvm-test: libgtest.a $(TEST_OBJS)
-	$(CXX) -L. $(LIBS_LINKING) $(LDFLAGS) $(TEST_OBJS) -lm -lgtest $(TILERA_LIBS) -o $@
+rvm-test: libgtest.a $(TEST_OBJS) $(TEST_H)
+	$(CXX) $(LDFLAGS) $(TEST_OBJS) gtest-all.o -lm -lpthread  $(TILERA_LIBS) -L. $(LIBS_LINKING) -o $@
 
 test: rvm-test
-	@./rvm-test
+	$(AT)./rvm-test
 
 clean:
 	rm -f *.o *.opt $(EXECUTABLE) compiler_check rvm-test libgtest.a $(TEST_OBJS)

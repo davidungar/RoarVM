@@ -10,13 +10,14 @@
  ******************************************************************************/
 
 
-#define Track_OnStackPointer 1  /* Enforce this here for the tests */
+# if !On_Tilera
 
-#include "test_os_interface.h"
-#include "tracked_ptr_registry.h"
-#include "tracked_ptr.h"
+# define Track_OnStackPointer 1  /* Enforce this here for the tests */
 
-#include <gtest/gtest.h>
+# include <gtest/gtest.h>
+
+# include "headers.h"
+
 
 /** A simple class used in the tests **/
 class MyClass {
@@ -605,4 +606,5 @@ TEST(TrackedPointer, DISABLED_InvalidationDuringCall) {
   t->someMethodChangingFields();
 }
 
+# endif // !On_Tilera
 
